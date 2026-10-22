@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#f6f5f1"><title>Link Board · 链接收藏</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<header><a class="brand" href="./"><span class="logo">↗</span> Link Board</a><span class="private">你的私人链接书架 · 数据保存在此浏览器</span><button id="add" class="primary">＋ 收藏链接</button></header>
+<main><section class="intro"><div class="eyebrow">A LITTLE SPACE FOR GOOD FINDS</div><h1>好链接，<em>随手收好。</em></h1><p>留住值得再看的网页，让灵感有处可寻。</p></section>
+<section class="toolbar"><label class="search"><span>⌕</span><input id="search" type="search" placeholder="搜索标题、链接、笔记或标签…" aria-label="搜索收藏"><kbd>/</kbd></label><select id="sort" aria-label="排序"><option value="new">最近收藏</option><option value="old">最早收藏</option><option value="name">标题排序</option></select></section>
+<nav id="tags" aria-label="标签筛选"></nav><div class="section-head"><h2>我的收藏 <span id="count">0</span></h2><div><button id="import">导入</button><button id="export">导出备份 ↗</button></div></div>
+<section id="cards" aria-live="polite"></section><section id="empty" hidden><div class="empty-icon">↗</div><h2>给好链接留个位置</h2><p>收藏文章、工具和灵感，下次需要时轻松找到。</p><button id="first" class="primary">收藏第一个链接</button></section>
+<footer><span>少一点翻找，多一点发现。</span><span>LINK BOARD / YOUR PERSONAL COLLECTION</span></footer></main>
+<dialog id="editor"><form id="form"><div class="dialog-head"><h2 id="dialog-title">收藏新链接</h2><button type="button" id="close" aria-label="关闭">✕</button></div><label>网页链接<input name="url" type="text" placeholder="https://example.com" required maxlength="4096"></label><label>标题<input name="title" placeholder="给链接起个名字" required maxlength="200"></label><label>标签<input name="tags" placeholder="工具, 设计, 稍后阅读" maxlength="300"><small>使用逗号分隔，可填写多个标签</small></label><label>笔记<textarea name="note" placeholder="为什么想收藏它？" maxlength="2000" rows="3"></textarea></label><p id="error" role="alert"></p><div class="dialog-actions"><button type="button" id="cancel">取消</button><button class="primary" type="submit">保存收藏</button></div></form></dialog>
+<input id="file" type="file" accept="application/json,.json" hidden><div id="toast" role="status" hidden></div><script type="module" src="app.js"></script></body></html>
