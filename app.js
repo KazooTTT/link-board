@@ -10,6 +10,8 @@ let dbp = null;
 let items = [];
 let editing = null;
 let drag = null;
+let clickTimer = null;
+let suppressClick = false;
 
 // ---------------------------------------------------------------- 存储
 
@@ -124,6 +126,55 @@ function clampPos(x, y) {
   };
 }
 
+// 一键重排：按当前视觉顺序（先上后下、先左后右）排成规整网格
+const ROW_H = 104;
+const TOP_Y = 68;
+
+function gridCols() {
+  return Math.max(1, Math.floor((window.innerWidth - PAD * 2) / TILE_W));
+}
+
+function gridSlot(index) {
+  const cols = gridCols();
+  return {
+    x: PAD + (index % cols) * TILE_W,
+    y: TOP_Y + Math.floor(index / cols) * ROW_H,
+  };
+}
+
+function readingOrder(a, b) {
+  const rowA = Math.round((a.y - 68) / 104);
+  const rowB = Math.round((b.y - 68) / 104);
+  if (rowA !== rowB) return rowA - rowB;
+  if (a.x !== b.x) return a.x - b.x;
+  return String(a.created_at || '').localeCompare(String(b.created_at || ''));
+}
+
+async function relayout() {
+  if (!items.length) { toast('板上还没有链接'); return; }
+  const ordered = [...items].sort(readingOrder);
+  const boardEl = document.getElementById('board');
+  boardEl.classList.add('animating');
+  ordered.forEach((item, i) => Object.assign(item, gridSlot(i)));
+  const needed = TOP_Y + Math.ceil(ordered.length / gridCols()) * ROW_H + PAD;
+  // 一页装不下时让画板变高、页面可滚动，不把图标排到看不见的地方
+  boardEl.style.height = needed > window.innerHeight ? `${needed}px` : '';
+  document.body.classList.toggle('scrollable', needed > window.innerHeight);
+  render();
+  await Promise.all(ordered.map(put));
+  setTimeout(() => boardEl.classList.remove('animating'), 260);
+  toast(`已重排 ${ordered.length} 个链接`);
+}
+
+// 双击保护：第一次点击已经用原生 <a> 打开了，第二次点击（detail>=2）在 click 里吞掉
+
+// 键盘 Enter 用同一个原生打开路径
+function openItem(item) {
+  if (!item || !item.url) return;
+  const el = document.querySelector(`.tile[data-id="${CSS.escape(String(item.id))}"]`);
+  if (el) el.click();
+}
+
 // ---------------------------------------------------------------- 渲染
 
 const board = document.getElementById('board');
@@ -139,8 +190,12 @@ function toast(msg) {
 }
 
 function tileEl(item) {
-  const el = document.createElement('div');
+  const el = document.createElement('a');
   el.className = 'tile';
+  el.href = item.url;
+  el.target = '_blank';
+  el.rel = 'noopener noreferrer';
+  el.draggable = false;   // 否则原生拖链接会抢掉 pointer 事件
   el.dataset.id = String(item.id);
   el.dataset.url = item.url;
   el.dataset.search = `${item.title} ${hostOf(item.url)}`.toLowerCase();
@@ -320,17 +375,40 @@ board.addEventListener('pointermove', ev => {
   drag.moved = true;
 });
 
-board.addEventListener('pointerup', async () => {
+board.addEventListener('pointerup', async ev => {
   if (!drag) return;
   const { el, item, moved } = drag;
   drag = null;
   el.classList.remove('dragging');
-  if (moved) await put(item);
+  if (moved) {
+    suppressClick = true;   // 拖完不要跳转
+    await put(item);
+  }
+});
+
+// 拖拽后不要触发链接跳转；双击的第二次点击（detail>=2）也吞掉
+board.addEventListener('click', ev => {
+  const el = ev.target.closest('.tile');
+  if (!el) { document.activeElement?.blur?.(); return; }
+  if (suppressClick || ev.detail > 1) {
+    ev.preventDefault();
+    suppressClick = false;
+  }
 });
 
 board.addEventListener('dblclick', ev => {
   const el = ev.target.closest('.tile');
   if (!el) return;
+  ev.preventDefault();
+  // 双击不编辑，避免和单击打开冲突；编辑走右键或 E
+});
+
+// 右键 = 编辑（替代原来的双击入口）
+board.addEventListener('contextmenu', ev => {
+  const el = ev.target.closest('.tile');
+  if (!el) return;
+  ev.preventDefault();
+  clearTimeout(clickTimer);
   const item = items.find(it => it.id === el.dataset.id);
   if (item) openDialog(item);
 });
@@ -340,7 +418,8 @@ board.addEventListener('keydown', ev => {
   if (!el) return;
   const item = items.find(it => it.id === el.dataset.id);
   if (!item) return;
-  if (ev.key === 'Enter') { ev.preventDefault(); openDialog(item); }
+  if (ev.key === 'Enter') { ev.preventDefault(); suppressClick = false; el.click(); }
+  if (ev.key === 'e' || ev.key === 'E') { ev.preventDefault(); openDialog(item); }
   if (ev.key === 'Delete' || ev.key === 'Backspace') {
     ev.preventDefault();
     remove(item.id).then(() => {
@@ -363,11 +442,7 @@ board.addEventListener('keydown', ev => {
   }
 });
 
-// 点空白处关掉焦点
-board.addEventListener('click', ev => {
-  if (!ev.target.closest('.tile')) document.activeElement?.blur?.();
-});
-
+board.addEventListener('pointerdown', () => { suppressClick = false; });
 // ---------------------------------------------------------------- 粘贴
 
 function extractURL(text) {
@@ -397,6 +472,16 @@ window.addEventListener('drop', async ev => {
 });
 
 document.getElementById('q').addEventListener('input', ev => applyFilter(ev.currentTarget.value));
+
+document.getElementById('relayout').onclick = () => relayout();
+
+// R 一键重排（输入框里打字时不触发）
+window.addEventListener('keydown', ev => {
+  if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  const t = ev.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+  if (ev.key === 'r' || ev.key === 'R') { ev.preventDefault(); relayout(); }
+});
 
 // 窗口改大小时把跑出边界的图标拉回来
 window.addEventListener('resize', async () => {

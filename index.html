@@ -21,6 +21,8 @@
     font:14px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;
     overflow:hidden;
   }
+  body.scrollable{overflow:auto}
+  body.scrollable #board{position:relative; inset:auto; min-height:100vh; width:100%}
   #board{
     position:absolute; inset:0;
     background-image:radial-gradient(var(--grid) 1px, transparent 1px);
@@ -46,14 +48,19 @@
   }
   button:hover{border-color:var(--muted)}
   button.primary{background:var(--accent); border-color:var(--accent); color:#fff}
+  #relayout{display:inline-flex; align-items:center; gap:6px}
+  #relayout svg{width:14px; height:14px}
 
   .tile{
     position:absolute; width:96px; padding:8px 4px 6px;
     display:flex; flex-direction:column; align-items:center; gap:6px;
     border-radius:14px; background:transparent; border:1px solid transparent;
-    cursor:grab; user-select:none; touch-action:none;
+    color:inherit; text-decoration:none;
+    cursor:pointer; user-select:none; touch-action:none;
     transition:background .12s,border-color .12s;
   }
+  #board.animating .tile{transition:left .2s ease, top .2s ease, background .12s, border-color .12s}
+  .tile.dragging{transition:none !important}
   .tile:hover,.tile:focus-visible{background:color-mix(in srgb,var(--card) 70%,transparent); border-color:var(--line); outline:none}
   .tile.dragging{cursor:grabbing; z-index:10; background:var(--card); border-color:var(--accent); box-shadow:var(--shadow)}
   .icon{
@@ -112,6 +119,10 @@
   <span class="brand">链接画板</span>
   <span class="count" id="count"></span>
   <input id="q" type="search" placeholder="搜标题或域名…">
+  <button id="relayout" title="把所有图标排成整齐的网格（R）">
+    <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="1.5" width="5" height="5" rx="1" fill="currentColor"/><rect x="9.5" y="1.5" width="5" height="5" rx="1" fill="currentColor"/><rect x="1.5" y="9.5" width="5" height="5" rx="1" fill="currentColor"/><rect x="9.5" y="9.5" width="5" height="5" rx="1" fill="currentColor"/></svg>
+    重排
+  </button>
   <button id="add">＋ 添加</button>
 </header>
 
@@ -119,9 +130,9 @@
 <div class="empty" id="empty">
   <b>粘贴一个链接试试</b>
   <span>按 <kbd>⌘</kbd>+<kbd>V</kbd>，链接会变成图标留在板上</span>
-  <span>拖动排位置，双击编辑</span>
+  <span>单击打开 · 拖动排位置 · 右键编辑</span>
 </div>
-<div class="hint">⌘V 粘贴链接 · 双击编辑 · Delete 删除</div>
+<div class="hint">⌘V 粘贴链接 · 单击打开 · 右键编辑 · Delete 删除 · R 重排</div>
 <div class="toast" id="toast"></div>
 
 <dialog id="dlg">
