@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>链接画板</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232f6df6'/%3E%3Ccircle cx='26' cy='32' r='9' fill='%23fff'/%3E%3Ccircle cx='44' cy='24' r='5' fill='%23fff' opacity='.75'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#f6f5f2; --grid:#e6e3dc; --card:#fff; --fg:#1d1d1f; --muted:#8a8781;
+    --line:#dcd8cf; --accent:#2f6df6; --shadow:0 2px 6px rgba(0,0,0,.07),0 8px 24px rgba(0,0,0,.06);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#161615; --grid:#232322; --card:#1f1f1e; --fg:#ededeb; --muted:#9a9791;
+      --line:#33322f; --accent:#5b8cff; --shadow:0 2px 6px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3); }
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;
+    overflow:hidden;
+  }
+  #board{
+    position:absolute; inset:0;
+    background-image:radial-gradient(var(--grid) 1px, transparent 1px);
+    background-size:22px 22px;
+    cursor:default;
+  }
+  header{
+    position:fixed; top:0; left:0; right:0; z-index:20;
+    display:flex; align-items:center; gap:10px;
+    padding:10px 14px; pointer-events:none;
+  }
+  header > *{pointer-events:auto}
+  .brand{font-weight:650; letter-spacing:.2px; margin-right:4px}
+  .count{color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums}
+  #q{
+    flex:0 0 240px; margin-left:auto; padding:7px 11px; border-radius:8px;
+    border:1px solid var(--line); background:var(--card); color:var(--fg); font:inherit;
+    box-shadow:var(--shadow);
+  }
+  button{
+    font:inherit; padding:7px 11px; border-radius:8px; border:1px solid var(--line);
+    background:var(--card); color:var(--fg); cursor:pointer; box-shadow:var(--shadow);
+  }
+  button:hover{border-color:var(--muted)}
+  button.primary{background:var(--accent); border-color:var(--accent); color:#fff}
+
+  .tile{
+    position:absolute; width:96px; padding:8px 4px 6px;
+    display:flex; flex-direction:column; align-items:center; gap:6px;
+    border-radius:14px; background:transparent; border:1px solid transparent;
+    cursor:grab; user-select:none; touch-action:none;
+    transition:background .12s,border-color .12s;
+  }
+  .tile:hover,.tile:focus-visible{background:color-mix(in srgb,var(--card) 70%,transparent); border-color:var(--line); outline:none}
+  .tile.dragging{cursor:grabbing; z-index:10; background:var(--card); border-color:var(--accent); box-shadow:var(--shadow)}
+  .icon{
+    width:56px; height:56px; border-radius:14px; display:grid; place-items:center;
+    background:var(--card); box-shadow:var(--shadow); overflow:hidden;
+    font-size:22px; font-weight:600; color:#fff;
+  }
+  .icon img{width:32px; height:32px; object-fit:contain}
+  .label{
+    font-size:12px; line-height:1.3; text-align:center; max-width:92px;
+    overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+    word-break:break-word;
+  }
+  .tile.hidden{display:none}
+
+  .empty{
+    position:absolute; inset:0; display:grid; place-content:center; text-align:center;
+    color:var(--muted); gap:6px; pointer-events:none;
+  }
+  .empty b{color:var(--fg); font-size:15px}
+  kbd{border:1px solid var(--line); border-bottom-width:2px; border-radius:5px;
+    padding:1px 6px; font:12px/1.4 ui-monospace,monospace; background:var(--card); color:var(--fg)}
+
+  dialog{
+    border:1px solid var(--line); border-radius:14px; padding:0; background:var(--card);
+    color:var(--fg); box-shadow:0 20px 60px rgba(0,0,0,.3); width:340px; max-width:92vw;
+  }
+  dialog::backdrop{background:rgba(0,0,0,.25)}
+  .dlg{padding:16px}
+  .dlg h3{margin:0 0 12px; font-size:15px}
+  .row{display:flex; flex-direction:column; gap:4px; margin-bottom:10px}
+  .row label{font-size:12px; color:var(--muted)}
+  .row input,.row select{
+    padding:8px 10px; border-radius:8px; border:1px solid var(--line);
+    background:var(--bg); color:var(--fg); font:inherit;
+  }
+  .preview{display:flex; align-items:center; gap:10px; margin:2px 0 12px}
+  .preview .icon{width:44px;height:44px;font-size:18px;box-shadow:none;border:1px solid var(--line)}
+  .acts{display:flex; gap:8px; justify-content:flex-end}
+  .acts .danger{margin-right:auto; color:#c0392b; border-color:color-mix(in srgb,#c0392b 30%,var(--line))}
+
+  .hint{
+    position:fixed; left:14px; bottom:12px; font-size:12px; color:var(--muted);
+    pointer-events:none;
+  }
+  .toast{
+    position:fixed; left:50%; bottom:24px; transform:translate(-50%,10px);
+    background:var(--fg); color:var(--bg); padding:8px 14px; border-radius:20px;
+    font-size:13px; opacity:0; transition:.18s; pointer-events:none; z-index:40;
+  }
+  .toast.on{opacity:1; transform:translate(-50%,0)}
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">链接画板</span>
+  <span class="count" id="count"></span>
+  <input id="q" type="search" placeholder="搜标题或域名…">
+  <button id="add">＋ 添加</button>
+</header>
+
+<div id="board"></div>
+<div class="empty" id="empty">
+  <b>粘贴一个链接试试</b>
+  <span>按 <kbd>⌘</kbd>+<kbd>V</kbd>，链接会变成图标留在板上</span>
+  <span>拖动排位置，双击编辑</span>
+</div>
+<div class="hint">⌘V 粘贴链接 · 双击编辑 · Delete 删除</div>
+<div class="toast" id="toast"></div>
+
+<dialog id="dlg">
+  <form class="dlg" method="dialog" id="dlg-form">
+    <h3 id="dlg-title">编辑</h3>
+    <div class="preview">
+      <div class="icon" id="dlg-icon"></div>
+      <span class="count" id="dlg-host"></span>
+    </div>
+    <div class="row"><label for="f-title">名字</label><input id="f-title" required></div>
+    <div class="row"><label for="f-url">链接</label><input id="f-url" type="url" required></div>
+    <div class="row"><label for="f-icon">图标地址（留空自动）</label><input id="f-icon" placeholder="https://…"></div>
+    <div class="row"><label for="f-color">底色（没图标时用）</label>
+      <select id="f-color">
+        <option value="">自动</option>
+        <option value="#2f6df6">蓝</option>
+        <option value="#e05d44">红</option>
+        <option value="#1f9d55">绿</option>
+        <option value="#8a5cf6">紫</option>
+        <option value="#d97706">橙</option>
+        <option value="#334155">灰</option>
+      </select>
+    </div>
+    <div class="acts">
+      <button type="button" class="danger" id="f-del">删除</button>
+      <button type="button" id="f-cancel">取消</button>
+      <button type="submit" class="primary">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>
