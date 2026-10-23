@@ -75,6 +75,41 @@
     word-break:break-word;
   }
   .tile.hidden{display:none}
+  .tile.in-collapsed-group{display:none}
+  .tile.selected{background:color-mix(in srgb,var(--accent) 10%,var(--card)); border-color:var(--accent)}
+
+  .group-frame{
+    position:absolute; border:1.5px dashed var(--line); border-radius:18px;
+    background:color-mix(in srgb,var(--card) 40%,transparent);
+    pointer-events:none; z-index:0;
+  }
+  .group-frame.hidden{display:none}
+  .group-frame.collapsed{border-style:solid; background:var(--card); box-shadow:var(--shadow); pointer-events:auto}
+  .g-label{
+    position:absolute; top:6px; left:10px; max-width:60%; pointer-events:auto;
+    font-size:11px; line-height:1; padding:4px 8px; border-radius:999px;
+    background:var(--card); border:1px solid var(--line); color:var(--muted);
+    cursor:grab; user-select:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .g-label.grabbing{cursor:grabbing}
+  .g-count{
+    position:absolute; top:8px; right:56px; font-size:10px; color:var(--muted);
+    font-variant-numeric:tabular-nums; pointer-events:none;
+  }
+  .g-fold,.g-del{
+    position:absolute; top:4px; width:20px; height:20px; padding:0; border-radius:6px;
+    font-size:12px; line-height:1; display:grid; place-items:center;
+    pointer-events:auto; box-shadow:none; border-color:transparent; background:transparent; color:var(--muted);
+  }
+  .g-fold{right:28px}
+  .g-del{right:6px}
+  .g-fold:hover,.g-del:hover{background:var(--bg); border-color:var(--line); color:var(--fg)}
+  .g-folder{
+    position:absolute; left:10px; top:34px; width:56px; height:56px; border-radius:14px;
+    background:color-mix(in srgb,var(--accent) 12%,var(--card)); border:1px solid var(--line);
+    display:grid; place-items:center; font-size:24px;
+  }
+  .group-frame.collapsed .g-label{max-width:calc(100% - 60px)}
 
   .empty{
     position:absolute; inset:0; display:grid; place-content:center; text-align:center;
@@ -123,6 +158,7 @@
     <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="1.5" width="5" height="5" rx="1" fill="currentColor"/><rect x="9.5" y="1.5" width="5" height="5" rx="1" fill="currentColor"/><rect x="1.5" y="9.5" width="5" height="5" rx="1" fill="currentColor"/><rect x="9.5" y="9.5" width="5" height="5" rx="1" fill="currentColor"/></svg>
     重排
   </button>
+  <button id="group" disabled title="把选中的图标打成一个组（Shift+单击多选，G）">打组</button>
   <button id="add">＋ 添加</button>
 </header>
 
@@ -132,7 +168,7 @@
   <span>按 <kbd>⌘</kbd>+<kbd>V</kbd>，链接会变成图标留在板上</span>
   <span>单击打开 · 拖动排位置 · 右键编辑</span>
 </div>
-<div class="hint">⌘V 粘贴链接 · 单击打开 · 右键编辑 · Delete 删除 · R 重排</div>
+<div class="hint">⌘V 粘贴链接 · 单击打开 · Shift+单击多选 · G 打组 · 右键编辑 · Delete 删除 · R 重排</div>
 <div class="toast" id="toast"></div>
 
 <dialog id="dlg">
@@ -159,6 +195,17 @@
     <div class="acts">
       <button type="button" class="danger" id="f-del">删除</button>
       <button type="button" id="f-cancel">取消</button>
+      <button type="submit" class="primary">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="gdlg">
+  <form class="dlg" id="gdlg-form">
+    <h3 id="gdlg-title">新建分组</h3>
+    <div class="row"><label for="g-name">分组名</label><input id="g-name" required maxlength="24" placeholder="例如：设计工具"></div>
+    <div class="acts">
+      <button type="button" id="g-cancel">取消</button>
       <button type="submit" class="primary">保存</button>
     </div>
   </form>

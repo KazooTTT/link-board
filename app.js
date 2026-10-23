@@ -3,11 +3,16 @@
 
 const DB_NAME = 'link-board';
 const STORE = 'items';
+const GROUPS = 'groups';
+const DB_VERSION = 2;
 const TILE_W = 96;
+const TILE_H = 100;
 const PAD = 16;
 
 let dbp = null;
 let items = [];
+let groups = [];
+let selected = new Set();
 let editing = null;
 let drag = null;
 let clickTimer = null;
@@ -18,11 +23,14 @@ let suppressClick = false;
 function openDB() {
   if (dbp) return dbp;
   dbp = new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) {
         db.createObjectStore(STORE, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(GROUPS)) {
+        db.createObjectStore(GROUPS, { keyPath: 'id' });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -31,9 +39,9 @@ function openDB() {
   return dbp;
 }
 
-async function tx(mode) {
+async function tx(mode, name = STORE) {
   const db = await openDB();
-  return db.transaction(STORE, mode).objectStore(STORE);
+  return db.transaction(name, mode).objectStore(name);
 }
 
 async function loadAll() {
@@ -56,6 +64,33 @@ async function put(item) {
 
 async function remove(id) {
   const store = await tx('readwrite');
+  return new Promise((resolve, reject) => {
+    const req = store.delete(id);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function loadGroups() {
+  const store = await tx('readonly', GROUPS);
+  return new Promise((resolve, reject) => {
+    const req = store.getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function putGroup(group) {
+  const store = await tx('readwrite', GROUPS);
+  return new Promise((resolve, reject) => {
+    const req = store.put(group);
+    req.onsuccess = () => resolve(group);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function removeGroup(id) {
+  const store = await tx('readwrite', GROUPS);
   return new Promise((resolve, reject) => {
     const req = store.delete(id);
     req.onsuccess = () => resolve();
@@ -111,8 +146,8 @@ function colorFor(seed) {
 // ---------------------------------------------------------------- 布局
 
 function nextSlot() {
-  const cols = Math.max(1, Math.floor((window.innerWidth - PAD * 2) / TILE_W));
-  const n = items.length;
+  const cols = gridCols();
+  const n = items.filter(it => !it.group).length;
   return {
     x: PAD + (n % cols) * TILE_W,
     y: 68 + Math.floor(n / cols) * 104,
@@ -143,8 +178,8 @@ function gridSlot(index) {
 }
 
 function readingOrder(a, b) {
-  const rowA = Math.round((a.y - 68) / 104);
-  const rowB = Math.round((b.y - 68) / 104);
+  const rowA = Math.round((a.y - TOP_Y) / ROW_H);
+  const rowB = Math.round((b.y - TOP_Y) / ROW_H);
   if (rowA !== rowB) return rowA - rowB;
   if (a.x !== b.x) return a.x - b.x;
   return String(a.created_at || '').localeCompare(String(b.created_at || ''));
@@ -155,8 +190,14 @@ async function relayout() {
   const ordered = [...items].sort(readingOrder);
   const boardEl = document.getElementById('board');
   boardEl.classList.add('animating');
-  ordered.forEach((item, i) => Object.assign(item, gridSlot(i)));
-  const needed = TOP_Y + Math.ceil(ordered.length / gridCols()) * ROW_H + PAD;
+  const hasGroups = groups.some(g => items.some(it => it.group === g.id));
+  let needed;
+  if (hasGroups) {
+    needed = layoutUnits(ordered);
+  } else {
+    ordered.forEach((item, i) => Object.assign(item, gridSlot(i)));
+    needed = TOP_Y + Math.ceil(ordered.length / gridCols()) * ROW_H + PAD;
+  }
   // 一页装不下时让画板变高、页面可滚动，不把图标排到看不见的地方
   boardEl.style.height = needed > window.innerHeight ? `${needed}px` : '';
   document.body.classList.toggle('scrollable', needed > window.innerHeight);
@@ -164,6 +205,46 @@ async function relayout() {
   await Promise.all(ordered.map(put));
   setTimeout(() => boardEl.classList.remove('animating'), 260);
   toast(`已重排 ${ordered.length} 个链接`);
+}
+
+// 有分组时按「单元」排版：一个分组占一块地方，组员在块内排成小网格
+function layoutUnits(ordered) {
+  const units = [];
+  const seen = new Set();
+  for (const it of ordered) {
+    if (it.group && groups.some(g => g.id === it.group)) {
+      if (seen.has(it.group)) continue;
+      seen.add(it.group);
+      units.push(ordered.filter(x => x.group === it.group));
+    } else {
+      units.push([it]);
+    }
+  }
+  const maxRight = window.innerWidth - PAD;
+  let x = PAD, y = TOP_Y, rowH = 0;
+  for (const unit of units) {
+    const n = unit.length;
+    const grouped = n > 1 || (n === 1 && unit[0].group);
+    const cols = grouped ? Math.min(3, Math.ceil(Math.sqrt(n))) : 1;
+    const w = cols * TILE_W + (grouped ? 20 : 0);
+    const h = Math.ceil(n / cols) * ROW_H + (grouped ? 30 : 0);
+    if (x > PAD && x + w > maxRight) { x = PAD; y += rowH + 20; rowH = 0; }
+    unit.forEach((it, i) => {
+      it.x = x + (grouped ? 10 : 0) + (i % cols) * TILE_W;
+      it.y = y + (grouped ? 30 : 0) + Math.floor(i / cols) * ROW_H;
+    });
+    x += w + 20;
+    rowH = Math.max(rowH, h);
+  }
+  return y + rowH + PAD;
+}
+
+function groupBounds(members) {
+  const minX = Math.min(...members.map(m => m.x));
+  const minY = Math.min(...members.map(m => m.y));
+  const maxX = Math.max(...members.map(m => m.x + TILE_W));
+  const maxY = Math.max(...members.map(m => m.y + TILE_H));
+  return { x: minX - 10, y: minY - 30, w: maxX - minX + 20, h: maxY - minY + 40 };
 }
 
 // 双击保护：第一次点击已经用原生 <a> 打开了，第二次点击（detail>=2）在 click 里吞掉
@@ -192,6 +273,9 @@ function toast(msg) {
 function tileEl(item) {
   const el = document.createElement('a');
   el.className = 'tile';
+  el.classList.toggle('selected', selected.has(item.id));
+  el.classList.toggle('in-collapsed-group', groups.some(g => g.id === item.group && g.collapsed));
+  el.setAttribute('aria-label', item.title || hostOf(item.url));
   el.href = item.url;
   el.target = '_blank';
   el.rel = 'noopener noreferrer';
@@ -237,6 +321,10 @@ function tileEl(item) {
 function render() {
   board.innerHTML = '';
   const frag = document.createDocumentFragment();
+  for (const group of groups) {
+    const members = items.filter(it => it.group === group.id);
+    if (members.length) frag.appendChild(groupEl(group, members));
+  }
   for (const item of items) frag.appendChild(tileEl(item));
   board.appendChild(frag);
   emptyEl.hidden = items.length > 0;
@@ -246,10 +334,67 @@ function render() {
 
 function applyFilter(q) {
   const needle = String(q || '').trim().toLowerCase();
-  for (const el of board.children) {
-    el.classList.toggle('hidden', Boolean(needle) && !el.dataset.search.includes(needle));
+  for (const el of board.querySelectorAll('.tile')) {
+    const item = items.find(it => it.id === el.dataset.id);
+    const group = groups.find(g => g.id === item.group);
+    const matches = !needle || `${el.dataset.search} ${group?.name || ''}`.toLowerCase().includes(needle);
+    el.classList.toggle('hidden', !matches);
+    el.classList.toggle('in-collapsed-group', Boolean(group?.collapsed) && !needle);
   }
+  for (const el of board.querySelectorAll('.group-frame')) {
+    const group = groups.find(g => g.id === el.dataset.group);
+    el.classList.toggle('hidden', Boolean(needle) && !items.some(it => it.group === group.id && `${it.title} ${hostOf(it.url)} ${group.name}`.toLowerCase().includes(needle)));
+  }
+  document.getElementById('group').disabled = !items.some(it => selected.has(it.id));
 }
+
+let editingGroup = null;
+function openGroupDialog(group = null) {
+  if (!group && !items.some(it => selected.has(it.id))) return;
+  editingGroup = group;
+  document.getElementById('gdlg-title').textContent = group ? '重命名分组' : '新建分组';
+  document.getElementById('g-name').value = group?.name || '';
+  document.getElementById('gdlg').showModal();
+  document.getElementById('g-name').focus();
+}
+function groupEl(group, members) {
+  const el = document.createElement('div');
+  el.className = 'group-frame' + (group.collapsed ? ' collapsed' : '');
+  el.dataset.group = group.id;
+  const box = groupBounds(members);
+  Object.assign(el.style, {left: `${box.x}px`, top: `${box.y}px`, width: `${group.collapsed ? 180 : box.w}px`, height: `${group.collapsed ? 100 : box.h}px`});
+  const label = document.createElement('button');
+  label.className = 'g-label'; label.textContent = group.name;
+  label.title = '重命名分组'; label.onclick = () => openGroupDialog(group);
+  const count = document.createElement('span'); count.className = 'g-count'; count.textContent = members.length;
+  const fold = document.createElement('button'); fold.className = 'g-fold'; fold.textContent = group.collapsed ? '＋' : '−';
+  fold.setAttribute('aria-label', `${group.collapsed ? '展开' : '折叠'} ${group.name}`);
+  fold.onclick = async () => { group.collapsed = !group.collapsed; await putGroup(group); render(); };
+  const del = document.createElement('button'); del.className = 'g-del'; del.textContent = '×'; del.setAttribute('aria-label', `解散 ${group.name}`);
+  del.onclick = async () => {
+    if (!confirm(`解散“${group.name}”？链接会保留。`)) return;
+    for (const it of members) { delete it.group; await put(it); }
+    await removeGroup(group.id); groups = groups.filter(g => g.id !== group.id); render();
+  };
+  el.append(label, count, fold, del);
+  return el;
+}
+document.getElementById('group').onclick = () => openGroupDialog();
+document.getElementById('g-cancel').onclick = () => document.getElementById('gdlg').close();
+document.getElementById('gdlg-form').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  const name = document.getElementById('g-name').value.trim();
+  if (!name) return;
+  const group = editingGroup || { id: crypto.randomUUID(), collapsed: false };
+  group.name = name;
+  await putGroup(group);
+  if (!editingGroup) {
+    groups.push(group);
+    for (const it of items.filter(it => selected.has(it.id))) { it.group = group.id; await put(it); }
+  }
+  selected.clear(); document.getElementById('gdlg').close();
+  if (editingGroup) render(); else await relayout();
+});
 
 // ---------------------------------------------------------------- 增删改
 
@@ -359,7 +504,7 @@ board.addEventListener('pointerdown', ev => {
   const el = ev.target.closest('.tile');
   if (!el) return;
   const item = items.find(it => it.id === el.dataset.id);
-  if (!item) return;
+  if (!item || ev.shiftKey) return;
   drag = { el, item, dx: ev.clientX - item.x, dy: ev.clientY - item.y, moved: false };
   el.setPointerCapture(ev.pointerId);
   el.classList.add('dragging');
@@ -390,6 +535,11 @@ board.addEventListener('pointerup', async ev => {
 board.addEventListener('click', ev => {
   const el = ev.target.closest('.tile');
   if (!el) { document.activeElement?.blur?.(); return; }
+  if (ev.shiftKey) {
+    ev.preventDefault();
+    if (selected.has(el.dataset.id)) selected.delete(el.dataset.id); else selected.add(el.dataset.id);
+    render(); return;
+  }
   if (suppressClick || ev.detail > 1) {
     ev.preventDefault();
     suppressClick = false;
@@ -478,8 +628,11 @@ document.getElementById('relayout').onclick = () => relayout();
 // R 一键重排（输入框里打字时不触发）
 window.addEventListener('keydown', ev => {
   if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  if (document.querySelector('dialog[open]')) return;
   const t = ev.target;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+  if (ev.key === 'g' || ev.key === 'G') { ev.preventDefault(); openGroupDialog(); }
+  if (ev.key === 'Escape') { selected.clear(); render(); }
   if (ev.key === 'r' || ev.key === 'R') { ev.preventDefault(); relayout(); }
 });
 
@@ -501,6 +654,7 @@ window.addEventListener('resize', async () => {
 (async function init() {
   try {
     items = await loadAll();
+    groups = await loadGroups();
     items.sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
     // 老数据没有坐标的给个位置
     let changed = false;
