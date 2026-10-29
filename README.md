@@ -33,3 +33,7 @@ python3 -m http.server 5174 --bind 127.0.0.1
 ## 源码仓库
 
 左侧边栏底部有「GitHub 仓库」入口，点击在新标签页打开本项目源码（界面不展示完整 URL 文本）。
+
+## Agent 任务 Issue
+
+新建 Issue 时选择「Agent 任务」模板（`.github/ISSUE_TEMPLATE/agent-task.yml`），提交后自动带上 `agent-tasks` 标签，进入 Agent 任务队列。需求描述和验收标准为必填项。
