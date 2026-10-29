@@ -126,15 +126,88 @@ function prettyName(url, title) {
   return first.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
-function iconCandidates(url, custom) {
+function iconCandidates(url, custom, extras = []) {
   const host = hostOf(url);
   const list = [];
-  if (custom) list.push(custom);
+  const seen = new Set();
+  const push = u => {
+    if (!u || seen.has(u)) return;
+    seen.add(u);
+    list.push(u);
+  };
+  if (custom) push(custom);
+  for (const u of extras) push(u);
   // 依次尝试，前一个 404/被墙就换下一个，全挂了退回首字母
-  list.push(`https://icons.duckduckgo.com/ip3/${host}.ico`);
-  list.push(`https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=128`);
-  list.push(`https://${host}/favicon.ico`);
+  push(`https://icons.duckduckgo.com/ip3/${host}.ico`);
+  push(`https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=128`);
+  push(`https://${host}/favicon.ico`);
   return list;
+}
+
+function cleanAutoTitle(title) {
+  return String(title || '')
+    .replace(/\s*[|·\-–—]\s*[^|·\-–—]{0,40}$/, '')
+    .trim()
+    .slice(0, 80);
+}
+
+function resolveHref(href, base) {
+  try { return new URL(href, base).href; } catch { return ''; }
+}
+
+/** 从 HTML 片段解析 title / favicon（供 microlink 失败或信息不全时兜底） */
+function parseHeadMeta(html, pageUrl) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const metaTitle = (sel, attr = 'content') =>
+    (doc.querySelector(sel)?.getAttribute(attr) || doc.querySelector(sel)?.textContent || '').trim();
+  const title = metaTitle('meta[property="og:title" i]')
+    || metaTitle('meta[name="twitter:title" i]')
+    || metaTitle('meta[name="title" i]')
+    || (doc.querySelector('title')?.textContent || '').trim()
+    || metaTitle('meta[name="application-name" i]');
+
+  const icons = [];
+  for (const link of doc.querySelectorAll('link[href][rel]')) {
+    const rel = (link.getAttribute('rel') || '').toLowerCase();
+    if (!/(^|\s)(icon|apple-touch-icon|shortcut icon|mask-icon)(\s|$)/.test(rel)) continue;
+    const href = link.getAttribute('href');
+    if (!href || href.startsWith('data:')) continue;
+    const url = resolveHref(href, pageUrl);
+    if (!url) continue;
+    let score = 0;
+    if (rel.includes('apple-touch-icon')) score += 120;
+    else if (rel.includes('icon')) score += 60;
+    const sizes = link.getAttribute('sizes');
+    if (sizes && sizes !== 'any') {
+      for (const part of sizes.split(/\s+/)) {
+        const m = part.match(/^(\d+)x(\d+)$/i);
+        if (m) score += Math.min(parseInt(m[1], 10), 512);
+      }
+    }
+    if (/\.(png|webp|svg|jpg|jpeg)(\?|$)/i.test(url)) score += 8;
+    icons.push({ url, score });
+  }
+  icons.sort((a, b) => b.score - a.score);
+  const uniq = [];
+  const seen = new Set();
+  for (const { url } of icons) {
+    if (seen.has(url)) continue;
+    seen.add(url);
+    uniq.push(url);
+  }
+  return { title: cleanAutoTitle(title), icons: uniq };
+}
+
+async function fetchDocumentHtml(url, signal) {
+  const proxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+  try {
+    const res = await fetch(proxy, { signal });
+    if (!res.ok) return '';
+    const html = await res.text();
+    return html && html.length > 80 ? html.slice(0, 800_000) : '';
+  } catch {
+    return '';
+  }
 }
 
 function colorFor(seed) {
@@ -297,7 +370,7 @@ function tileEl(item) {
   const img = document.createElement('img');
   img.alt = '';
   img.referrerPolicy = 'no-referrer';
-  const candidates = iconCandidates(item.url, item.icon);
+  const candidates = iconCandidates(item.url, item.icon, item.icon_alts);
   let idx = 0;
   img.onload = () => {
     if (!img.naturalWidth) return;  // 有些站点会返回空图
@@ -428,22 +501,53 @@ async function addLink(url, opts = {}) {
   return item;
 }
 
-// 页面标题跨域读不到，借 microlink 的公开接口补一次；拿不到就保持域名推出来的名字
+// 跨域读不到页面 HTML：先 microlink，再 CORS 代理抓 head 解析 title / link[rel*=icon]
 async function enrichMeta(item) {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 8000);
-  try {
-    const res = await fetch(`https://api.microlink.io/?url=${encodeURIComponent(item.url)}`, { signal: ctrl.signal });
-    if (!res.ok) return;
-    const payload = await res.json();
-    const data = payload && payload.data;
-    if (!data) return;
-    let changed = false;
-    if (data.title && item.auto) {
-      item.title = String(data.title).replace(/\s*[|·-]\s*[^|·-]{0,20}$/, '').trim().slice(0, 80) || item.title;
-      changed = true;
+  const timer = setTimeout(() => ctrl.abort(), 12000);
+  let changed = false;
+  const applyParsed = parsed => {
+    if (!parsed) return;
+    if (parsed.title && item.auto) {
+      const next = cleanAutoTitle(parsed.title);
+      if (next && next !== item.title) {
+        item.title = next;
+        changed = true;
+      }
     }
-    if (data.logo && data.logo.url) { item.icon = data.logo.url; changed = true; }
+    if (parsed.icons?.length) {
+      if (!item.icon) {
+        item.icon = parsed.icons[0];
+        changed = true;
+      }
+      const alts = parsed.icons.filter(u => u !== item.icon).slice(0, 4);
+      if (alts.length && JSON.stringify(alts) !== JSON.stringify(item.icon_alts || [])) {
+        item.icon_alts = alts;
+        changed = true;
+      }
+    }
+  };
+  try {
+    try {
+      const res = await fetch(`https://api.microlink.io/?url=${encodeURIComponent(item.url)}`, { signal: ctrl.signal });
+      if (res.ok) {
+        const payload = await res.json();
+        const data = payload && payload.data;
+        if (data) {
+          applyParsed({
+            title: data.title,
+            icons: data.logo?.url ? [data.logo.url] : [],
+          });
+        }
+      }
+    } catch { /* microlink 不可用则走 HTML 解析 */ }
+
+    const needTitle = item.auto;
+    const needIcon = !item.icon;
+    if (needTitle || needIcon) {
+      const html = await fetchDocumentHtml(item.url, ctrl.signal);
+      if (html) applyParsed(parseHeadMeta(html, item.url));
+    }
     if (changed) { await put(item); render(); }
   } catch {
     /* 离线或被墙：用域名和字母兜底，不打扰用户 */
@@ -650,6 +754,10 @@ window.addEventListener('resize', async () => {
 });
 
 // ---------------------------------------------------------------- 启动
+
+if (typeof window !== 'undefined') {
+  window.__lb = { parseHeadMeta, cleanAutoTitle };
+}
 
 (async function init() {
   try {

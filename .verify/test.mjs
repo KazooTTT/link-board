@@ -18,8 +18,12 @@ const seedData = async () => {
   await page.goto(BASE, { waitUntil: 'networkidle' });
   await page.evaluate(async () => {
     const db = await new Promise((res, rej) => {
-      const r = indexedDB.open('link-board', 1);
-      r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains('items')) r.result.createObjectStore('items', { keyPath: 'id' }); };
+      const r = indexedDB.open('link-board', 2);
+      r.onupgradeneeded = () => {
+        const db = r.result;
+        if (!db.objectStoreNames.contains('items')) db.createObjectStore('items', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('groups')) db.createObjectStore('groups', { keyPath: 'id' });
+      };
       r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
     });
     const st = db.transaction('items', 'readwrite').objectStore('items');
@@ -144,7 +148,17 @@ await page.locator('button[type="submit"]').click();
 await page.waitForTimeout(400);
 ok('添加链接可用', (await page.locator('.tile').count()) === 7);
 
-const realErrors = errors.filter(e => !/favicon|Failed to load resource|ERR_NAME_NOT_RESOLVED|net::|microlink/i.test(e));
+const meta = await page.evaluate(() => window.__lb.parseHeadMeta(
+  '<!doctype html><html><head><title>Page Title | Site</title>'
+  + '<meta property="og:title" content="OG Title">'
+  + '<link rel="icon" href="/f.ico" sizes="32x32">'
+  + '<link rel="apple-touch-icon" href="/apple.png"></head><body></body></html>',
+  'https://example.com/app/',
+));
+ok('HTML 解析 og:title', meta.title === 'OG Title');
+ok('HTML 解析 favicon 优先级', meta.icons[0] === 'https://example.com/apple.png');
+
+const realErrors = errors.filter(e => !/favicon|Failed to load resource|ERR_NAME_NOT_RESOLVED|net::|microlink|allorigins/i.test(e));
 ok('无 JS 报错', realErrors.length === 0, realErrors.join(' | '));
 
 await browser.close();
