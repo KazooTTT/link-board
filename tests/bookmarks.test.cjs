@@ -3,11 +3,14 @@ const assert=require('node:assert/strict');
 const {readFileSync}=require('node:fs');
 const vm=require('node:vm');
 const {webcrypto}=require('node:crypto');
-const source=readFileSync(require('node:path').join(__dirname,'../app.js'),'utf8');
+const root=require('node:path').join(__dirname,'..');
+const appSrc=readFileSync(require('node:path').join(root,'app.js'),'utf8').replace(/^import .*;\n?/m,'');
+const metaStub=`function iconCandidates(url,custom,extras=[]){const list=[];if(custom)list.push(custom);return list}async function enrichLink(){}`;
+const source=metaStub+appSrc;
 function app(raw=null){
  const elements=new Map();
- function element(){return {value:'',disabled:false,hidden:false,children:[],append(...items){this.children.push(...items)},replaceChildren(...items){this.children=items},setAttribute(){},reset(){elements.get('#quick-url').value=''},click(){},focus(){}}}
- const document={querySelector(selector){if(!elements.has(selector))elements.set(selector,element());return elements.get(selector)},createElement:element,addEventListener(){},activeElement:{tagName:'BODY'}};
+ function element(tag){const el={tagName:(tag||'DIV').toUpperCase(),value:'',disabled:false,hidden:false,children:[],src:'',alt:'',referrerPolicy:'',naturalWidth:0,onload:null,onerror:null,dataset:{},append(...items){this.children.push(...items)},replaceChildren(...items){this.children=items},setAttribute(){},reset(){elements.get('#quick-url').value=''},click(){},focus(){}};return el}
+ const document={querySelector(selector){if(!elements.has(selector))elements.set(selector,element());return elements.get(selector)},createElement:tag=>element(tag),addEventListener(){},activeElement:{tagName:'BODY'}};
  const storage=new Map(raw===null?[]:[['link-board:v1',raw]]);
  const context=vm.createContext({document,localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value)},crypto:webcrypto,URL,Blob,setTimeout:()=>0,clearTimeout(){},window:{addEventListener(){}},location:{reload(){}},confirm:()=>true});
  vm.runInContext(source,context);
@@ -20,3 +23,4 @@ test('import merges unique URLs and rejects invalid batches atomically',async()=
 test('search includes notes and tags; pinning persists',()=>{const a=app();a.quick('example.com');a.run("links[0].note='阅读笔记';links[0].tags=['设计'];save(links)");a.elements.get('#search').value='设计';a.run('render()');assert.equal(a.elements.get('#cards').children.length,1);a.elements.get('#search').value='不存在';a.run('render()');assert.equal(a.elements.get('#cards').children.length,0);a.run('save(links.map(l=>({...l,pinned:true})))');assert.equal(JSON.parse(a.storage.get('link-board:v1'))[0].pinned,true)});
 test('coordinates survive reload and importing old records assigns stable positions',()=>{const a=app(JSON.stringify([{url:'https://a.example',title:'A'},{url:'https://b.example',title:'B',x:-100,y:500}]));assert.equal(a.run('links[0].x'),0);assert.equal(a.run('links[1].x'),-100);a.run('save(links)');const b=app(a.storage.get('link-board:v1'));assert.equal(b.run('links[1].y'),500);b.quick('https://c.example');assert.equal(b.run('links.find(l=>l.title==="B").x'),-100)});
 test('new capture clears filters to reveal saved card',()=>{const a=app();a.elements.get('#search').value='unmatched';a.quick('https://example.com');assert.equal(a.elements.get('#search').value,'');assert.equal(a.elements.get('#cards').children.length,1)});
+test('quick capture flags autoTitle for metadata enrichment',()=>{const a=app();a.quick('https://docs.example.com/page');const [link]=JSON.parse(a.storage.get('link-board:v1'));assert.equal(link.autoTitle,true);assert.equal(link.title,'docs.example.com');assert.equal(link.icon,'')});
