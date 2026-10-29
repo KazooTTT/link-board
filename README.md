@@ -25,3 +25,7 @@ python3 -m http.server 5174 --bind 127.0.0.1
 ## 自由画布
 
 拖动卡片调整位置，拖动空白处平移，滚轮缩放；底部提供缩放、适应画布和重置视图。聚焦卡片后可用方向键移动（Shift 加速）。新卡片出现在当前视野，旧版收藏自动分配初始位置。坐标随 JSON 备份导入导出，视图单独保存于当前浏览器。
+
+## 仓库地址
+
+左侧边栏底部展示 GitHub 仓库入口：[github.com/KazooTTT/link-board](https://github.com/KazooTTT/link-board)，点击在新标签页打开。
