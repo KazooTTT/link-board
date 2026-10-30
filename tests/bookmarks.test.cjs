@@ -10,11 +10,14 @@ const source=metaStub+appSrc;
 function app(raw=null){
  const elements=new Map();
  const listeners={};
- function element(tag){const el={tagName:(tag||'DIV').toUpperCase(),value:'',disabled:false,hidden:false,open:false,children:[],src:'',alt:'',referrerPolicy:'',naturalWidth:0,onload:null,onerror:null,dataset:{},append(...items){this.children.push(...items)},replaceChildren(...items){this.children=items},setAttribute(){},reset(){elements.get('#quick-url').value=''},click(){},focus(){}};return el}
+ function element(tag){const el={tagName:(tag||'DIV').toUpperCase(),value:'',disabled:false,hidden:false,open:false,children:[],src:'',alt:'',referrerPolicy:'',naturalWidth:0,onload:null,onerror:null,dataset:{},append(...items){this.children.push(...items)},replaceChildren(...items){this.children=items},setAttribute(){},reset(){const quick=elements.get('#quick-url');if(quick)quick.value='';for(const field of Object.values(this.elements??{}))field.value=''},click(){},showModal(){},close(){},focus(){this.focused=true}};return el}
  const document={querySelector(selector){if(!elements.has(selector))elements.set(selector,element());return elements.get(selector)},createElement:tag=>element(tag),addEventListener(type,fn){(listeners[type]??=[]).push(fn)},activeElement:{tagName:'BODY'}};
  const storage=new Map(raw===null?[]:[['link-board:v1',raw]]);
  const context=vm.createContext({document,localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value)},crypto:webcrypto,URL,Blob,setTimeout:()=>0,clearTimeout(){},window:{addEventListener(){}},location:{reload(){}},confirm:()=>true});
  vm.runInContext(source,context);
+ const form=document.querySelector('#form');
+ form.elements={};
+ for(const name of ['title','url','tags','note']){const field=element(name==='note'?'textarea':'input');field.name=name;form.elements[name]=field}
  const paste=(text,target)=>{const event={clipboardData:{getData:type=>type==='text/plain'?text:''},target:target??document.activeElement,defaultPrevented:false,preventDefault(){this.defaultPrevented=true}};for(const fn of listeners.paste??[])fn(event);return event};
  return {elements,storage,run:code=>vm.runInContext(code,context),quick(url){document.querySelector('#quick-url').value=url;document.querySelector('#quick-save').onsubmit({preventDefault(){},target:document.querySelector('#quick-save')})},paste};
 }
@@ -31,3 +34,5 @@ test('pasting a link captures it immediately without pressing enter',()=>{const 
 test('pasting a bare domain and several links adds each unique URL once',()=>{const a=app();a.paste('example.com/article');assert.equal(a.run('links.length'),1);a.paste('https://a.example/x\nhttps://b.example/y\nhttps://a.example/x');assert.equal(a.run('links.length'),3);a.paste('https://a.example/x');assert.equal(a.run('links.length'),3)});
 test('pasting non-link text is left alone',()=>{const a=app();const event=a.paste('普通文本，没有链接');assert.equal(event.defaultPrevented,false);assert.equal(a.run('links.length'),0)});
 test('paste inside the open editor is left to the field',()=>{const a=app();a.run("document.querySelector('#editor').open=true");const event=a.paste('https://example.com');assert.equal(event.defaultPrevented,false);assert.equal(a.run('links.length'),0)});
+
+test('editing focuses the title field first, new links keep url focus',()=>{const a=app(JSON.stringify([{url:'https://example.com/article',title:'Article'}]));a.run('open(links[0])');assert.equal(a.elements.get('#form').elements.title.focused,true);assert.equal(a.elements.get('#form').elements.url.focused,undefined);a.run('open()');assert.equal(a.elements.get('#form').elements.url.focused,true)});
