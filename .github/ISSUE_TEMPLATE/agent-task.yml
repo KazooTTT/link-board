@@ -1,0 +1,42 @@
+name: Agent 任务
+description: 自动带上 agent-tasks 标签，提交后进入 Agent 任务队列
+title: "[task] "
+labels: ["agent-tasks"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        用这个模板创建的 Issue 会自动打上 `agent-tasks` 标签，由 Agent Tasks 排队执行。
+        请写清现状、期望结果和可验证的验收标准，避免「优化一下」这类无法验收的描述。
+  - type: textarea
+    id: requirement
+    attributes:
+      label: 需求描述
+      description: 要做什么、现状是什么、期望的结果是什么
+      placeholder: 例如：首页输入框按 Esc 清空内容，且不触发搜索。
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准
+      description: 逐条列出可验证的完成条件，执行方按条给证据
+      placeholder: |
+        - 输入框按 Esc 后内容清空，列表恢复全量
+        - npm test 通过
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充上下文（可选）
+      description: 相关文件、截图、外部链接、已知限制
+    validations:
+      required: false
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 这是一个可执行、可验收的需求，不是单纯的提问
+          required: true
